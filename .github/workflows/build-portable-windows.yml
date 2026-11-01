@@ -1,0 +1,94 @@
+name: Build portable Cheat Engine (Windows x64)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/build-portable-windows.yml
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Download and verify official Lazarus compiler
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = Join-Path $env:RUNNER_TEMP 'lazarus-2.2.2-fpc-3.2.2-win64.exe'
+          $url = 'https://downloads.sourceforge.net/project/lazarus/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-win64.exe'
+          $expectedSha256 = '3AECCE3F12F9C1824DCB149142ABFBAEE4E162A2624E62CB0ECD9B7C2142B7E3'
+
+          Invoke-WebRequest -Uri $url -OutFile $installer -MaximumRedirection 10
+          $actualSha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+          if ($actualSha256 -ne $expectedSha256) {
+            throw "Lazarus installer checksum mismatch: $actualSha256"
+          }
+
+          $result = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /DIR=C:\lazarus' -Wait -PassThru
+          if ($result.ExitCode -ne 0) {
+            throw "Lazarus installation failed with exit code $($result.ExitCode)"
+          }
+          if (-not (Test-Path 'C:\lazarus\lazbuild.exe')) {
+            throw 'Lazarus compiler not found after installation.'
+          }
+
+      - name: Build source (64-bit release)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & 'C:\lazarus\lazbuild.exe' '--build-mode=Release 64-Bit' 'Cheat Engine\cheatengine.lpi'
+          if ($LASTEXITCODE -ne 0) {
+            throw "Cheat Engine build failed with exit code $LASTEXITCODE"
+          }
+          if (-not (Test-Path 'Cheat Engine\bin\cheatengine-x86_64.exe')) {
+            throw 'Build completed without producing cheatengine-x86_64.exe.'
+          }
+
+      - name: Package portable files and SHA-256 manifest
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $output = Join-Path $env:GITHUB_WORKSPACE 'portable-output\CheatEngine-Portable-Win64'
+          New-Item -ItemType Directory -Force -Path $output | Out-Null
+
+          # This contains the newly compiled EXE and supporting files from the
+          # upstream source tree. No advertising installer is built or included.
+          Copy-Item -Path 'Cheat Engine\bin\*' -Destination $output -Recurse -Force
+
+          $readme = @(
+            'Cheat Engine - portable Windows x64 source build',
+            "Source repository: $env:GITHUB_REPOSITORY",
+            "Source commit: $env:GITHUB_SHA",
+            'Compiler: Lazarus 2.2.2 / Free Pascal 3.2.2 (official SHA-256 verified)',
+            'Build mode: Release 64-Bit',
+            'No advertising installer or bundled offers are included.',
+            'This is a self-compiled core build; some optional modules were not rebuilt.',
+            'To run: extract the full ZIP and launch cheatengine-x86_64.exe.',
+            'Memory-editing tools can still be flagged as HackTool or PUA by antivirus.',
+            'Do not disable antivirus protection to run an unverified executable.'
+          )
+          $readme | Set-Content -Path (Join-Path $output 'BUILD-INFO.txt') -Encoding utf8
+
+          $hashes = Get-ChildItem -LiteralPath $output -Recurse -File | Sort-Object FullName | ForEach-Object {
+            $hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            $relative = $_.FullName.Substring($output.Length + 1).Replace('\', '/')
+            "$hash  $relative"
+          }
+          $hashes | Set-Content -Path (Join-Path $output 'SHA256SUMS.txt') -Encoding utf8
+          Write-Output "Compiled EXE SHA-256: $((Get-FileHash -LiteralPath (Join-Path $output 'cheatengine-x86_64.exe') -Algorithm SHA256).Hash)"
+
+      - name: Upload portable ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CheatEngine-Portable-Win64
+          path: portable-output/CheatEngine-Portable-Win64/
+          if-no-files-found: error
+          retention-days: 30
