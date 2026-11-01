@@ -26,7 +26,16 @@ jobs:
           $url = 'https://downloads.sourceforge.net/project/lazarus/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-win64.exe'
           $expectedSha256 = '3AECCE3F12F9C1824DCB149142ABFBAEE4E162A2624E62CB0ECD9B7C2142B7E3'
 
-          Invoke-WebRequest -Uri $url -OutFile $installer -MaximumRedirection 10
+          # SourceForge can return a small HTML redirect/challenge page to
+          # Invoke-WebRequest. curl follows mirror redirects more reliably.
+          & curl.exe --fail --location --retry 5 --retry-delay 3 --user-agent 'Mozilla/5.0' --output $installer $url
+          if ($LASTEXITCODE -ne 0) {
+            throw "Compiler download failed with curl exit code $LASTEXITCODE"
+          }
+          $size = (Get-Item -LiteralPath $installer).Length
+          if ($size -lt 190000000) {
+            throw "Compiler download is too small ($size bytes); likely a web page instead of the installer."
+          }
           $actualSha256 = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
           if ($actualSha256 -ne $expectedSha256) {
             throw "Lazarus installer checksum mismatch: $actualSha256"
