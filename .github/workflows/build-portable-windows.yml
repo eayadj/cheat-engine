@@ -23,11 +23,11 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $installer = Join-Path $env:RUNNER_TEMP 'lazarus-2.2.2-fpc-3.2.2-win64.exe'
-          $url = 'https://downloads.sourceforge.net/project/lazarus/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-win64.exe'
+          # Official Lazarus project mirror (SourceForge blocks Actions runners).
+          $url = 'https://download.lazarus-ide.org/Lazarus%20Windows%2064%20bits/Lazarus%202.2.2/lazarus-2.2.2-fpc-3.2.2-win64.exe'
           $expectedSha256 = '3AECCE3F12F9C1824DCB149142ABFBAEE4E162A2624E62CB0ECD9B7C2142B7E3'
 
-          # SourceForge can return a small HTML redirect/challenge page to
-          # Invoke-WebRequest. curl follows mirror redirects more reliably.
+          # Verify the file size and official checksum before executing it.
           & curl.exe --fail --location --retry 5 --retry-delay 3 --user-agent 'Mozilla/5.0' --output $installer $url
           if ($LASTEXITCODE -ne 0) {
             throw "Compiler download failed with curl exit code $LASTEXITCODE"
